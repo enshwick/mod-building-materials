@@ -238,7 +238,13 @@ impl Settings {
         rates.apply(self);
         enshwick::info!(
             "recipe output x{multiplier}: blocks {blocks}, overgrowth {overgrowth}, decor {decor}; {:?}",
-            (&self.comfort, &self.experience, &self.workshops, &self.drops, &self.skills)
+            (
+                &self.comfort,
+                &self.experience,
+                &self.workshops,
+                &self.drops,
+                &self.skills
+            )
         );
         changed
     }
@@ -281,6 +287,13 @@ impl Mod for GameRates {
             }
         })?;
         load.modify_recipes(|recipe| recipes::rates().scale(recipe))?;
+        // A dedicated server builds its recipes before it loads the items
+        // that tell their kinds, so the kinds apply in a rebuild.
+        load.on::<enshwick::events::WorldLoaded>(|()| {
+            if let Err(off) = enshwick::content::recipes::rebuild_recipes() {
+                enshwick::warn!("recipes keep their counts until the next start: {off}");
+            }
+        })?;
         Ok(Self)
     }
 }
@@ -296,24 +309,25 @@ mod tests {
     /// A host with the recipe layout the recipe patch reads.
     fn recipe_host() -> enshwick::test::FakeHost {
         let mut host = enshwick::test::FakeHost::new()
-            .field_offset("keen::RecipeRegistryResource", "recipes", 8)
-            .type_size("keen::RecipeInfo", 0xa8)
-            .type_size("keen::RecipeInputResource", 48)
-            .type_size("keen::RecipeItemStackResource", 24)
-            .field_offset("keen::RecipeItemStackResource", "item", 0x10)
-            .field_offset("keen::RecipeItemStackResource", "count", 0x14);
-        for (field, at) in [
-            ("recipeGuid", 0),
-            ("recipeId", 0x10),
-            ("workshopGuid", 0x14),
-            ("workshopId", 0x24),
-            ("input", 0x28),
-            ("output", 0x30),
-            ("requiredProps", 0x40),
-            ("completionRequirementQuery", 0x5c),
-            ("debugName", 0x78),
+            .type_hash(enshwick::content::types::RECIPE_REGISTRY.id(), 0x5e1f_0001);
+        for (id, size) in [("recipe", 0xa8), ("recipe_ingredient", 48), ("recipe_stack", 24)] {
+            host = host.type_size(id, size);
+        }
+        for (id, at) in [
+            ("recipe_registry.recipes", 8),
+            ("recipe.guid", 0),
+            ("recipe.id", 0x10),
+            ("recipe.workshop_guid", 0x14),
+            ("recipe.workshop", 0x24),
+            ("recipe.input", 0x28),
+            ("recipe.output", 0x30),
+            ("recipe.required_props", 0x40),
+            ("recipe.completion", 0x5c),
+            ("recipe.debug_name", 0x78),
+            ("recipe_stack.item", 0x10),
+            ("recipe_stack.count", 0x14),
         ] {
-            host = host.field_offset("keen::RecipeInfo", field, at);
+            host = host.constant(id, at);
         }
         host
     }
@@ -338,10 +352,24 @@ mod tests {
         assert!((settings.skills.points - 1.0).abs() < f32::EPSILON);
         assert!(settings.validate().is_ok());
         let synced = settings.synced().unwrap();
-        for key in ["multiplier", "blocks", "overgrowth", "decor", "speed", "points"] {
+        for key in [
+            "multiplier",
+            "blocks",
+            "overgrowth",
+            "decor",
+            "speed",
+            "points",
+        ] {
             assert!(synced.contains(key), "{key} in {synced}");
         }
-        for key in ["comfort", "combat", "mining", "exploration", "resources", "loot"] {
+        for key in [
+            "comfort",
+            "combat",
+            "mining",
+            "exploration",
+            "resources",
+            "loot",
+        ] {
             assert!(!synced.contains(key), "{key} in {synced}");
         }
     }
@@ -361,7 +389,10 @@ mod tests {
         assert_eq!(status, Status::OK, "{:?}", loader.logs());
         let combat = Rate::Experience(ExperienceGroup::Combat);
         assert_eq!(loader.rate(combat), Some(3.0));
-        assert_eq!(loader.rate(Rate::Experience(ExperienceGroup::Mining)), Some(1.0));
+        assert_eq!(
+            loader.rate(Rate::Experience(ExperienceGroup::Mining)),
+            Some(1.0)
+        );
         assert_eq!(loader.rate(Rate::Loot), Some(2.0));
         assert_eq!(loader.rate(Rate::SkillPoints), Some(1.5));
         assert_eq!(loader.rate(Rate::WorkshopSpeed), Some(1.0));
