@@ -310,7 +310,11 @@ mod tests {
     fn recipe_host() -> enshwick::test::FakeHost {
         let mut host = enshwick::test::FakeHost::new()
             .type_hash(enshwick::content::types::RECIPE_REGISTRY.id(), 0x5e1f_0001);
-        for (id, size) in [("recipe", 0xa8), ("recipe_ingredient", 48), ("recipe_stack", 24)] {
+        for (id, size) in [
+            ("recipe", 0xa8),
+            ("recipe_ingredient", 48),
+            ("recipe_stack", 24),
+        ] {
             host = host.type_size(id, size);
         }
         for (id, at) in [
